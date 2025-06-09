@@ -6,6 +6,7 @@ import { createContext, useContext, useEffect, useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { useAuth } from "@/lib/auth-context"
 import type { Product } from "@/lib/types"
+import { isUsingMySQL } from './config'
 
 type CartItem = {
   product: Product
@@ -29,28 +30,56 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const { toast } = useToast()
 
-  // Cargar carrito desde localStorage cuando el usuario inicia sesión
+  // Load cart from API or localStorage when user logs in
   useEffect(() => {
-    if (user) {
-      const savedCart = localStorage.getItem(`cart_${user.id}`)
-      if (savedCart) {
+    const loadCart = async () => {
+      if (!user) {
+        setCartItems([])
+        return
+      }
+      if (isUsingMySQL()) {
         try {
-          setCartItems(JSON.parse(savedCart))
-        } catch (error) {
-          console.error("Error parsing cart from localStorage:", error)
+          const res = await fetch(`/api/cart?userId=${user.id}`)
+          if (res.ok) {
+            const data = await res.json()
+            setCartItems(data.items)
+          } else {
+            console.error('Error fetching cart from API:', res.statusText)
+          }
+        } catch (err) {
+          console.error('Error loading cart from API:', err)
+        }
+      } else {
+        const saved = localStorage.getItem(`cart_${user.id}`)
+        if (saved) {
+          try {
+            setCartItems(JSON.parse(saved))
+          } catch (e) {
+            console.error('Error parsing cart from localStorage:', e)
+          }
         }
       }
-    } else {
-      // Limpiar carrito cuando el usuario cierra sesión
-      setCartItems([])
     }
+    loadCart()
   }, [user])
 
   // Guardar carrito en localStorage cuando cambia
   useEffect(() => {
-    if (user && cartItems.length > 0) {
-      localStorage.setItem(`cart_${user.id}`, JSON.stringify(cartItems))
+    if (!user) return
+    const save = async () => {
+      if (isUsingMySQL()) {
+        for (const item of cartItems) {
+          await fetch('/api/cart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, productId: item.product.id, quantity: item.quantity })
+          })
+        }
+      } else {
+        localStorage.setItem(`cart_${user.id}`, JSON.stringify(cartItems))
+      }
     }
+    save()
   }, [cartItems, user])
 
   const addToCart = (product: Product, quantity = 1) => {
@@ -63,18 +92,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    setCartItems((prevItems) => {
-      const existingItem = prevItems.find((item) => item.product.id === product.id)
-
-      if (existingItem) {
-        // Actualizar cantidad si el producto ya está en el carrito
-        return prevItems.map((item) =>
-          item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item,
-        )
-      } else {
-        // Añadir nuevo producto al carrito
-        return [...prevItems, { product, quantity }]
-      }
+    setCartItems((prev) => {
+      const exists = prev.find(i => i.product.id === product.id)
+      if (exists) return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + quantity } : i)
+      return [...prev, { product, quantity }]
     })
 
     toast({
@@ -84,8 +105,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }
 
   const removeFromCart = (productId: string) => {
-    setCartItems((prevItems) => prevItems.filter((item) => item.product.id !== productId))
-
+    setCartItems(prev => prev.filter(item => item.product.id !== productId))
+    if (isUsingMySQL() && user) {
+      fetch(`/api/cart?userId=${user.id}&productId=${productId}`, { method: 'DELETE' })
+    }
     toast({
       title: "Producto eliminado",
       description: "El producto se ha eliminado del carrito",
@@ -97,33 +120,32 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       removeFromCart(productId)
       return
     }
-
-    setCartItems((prevItems) => prevItems.map((item) => (item.product.id === productId ? { ...item, quantity } : item)))
+    setCartItems(prev => prev.map(item => item.product.id === productId ? { ...item, quantity } : item))
+    if (isUsingMySQL() && user) {
+      fetch('/api/cart', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, productId, quantity })
+      })
+    }
   }
 
   const clearCart = () => {
     setCartItems([])
     if (user) {
-      localStorage.removeItem(`cart_${user.id}`)
+      if (isUsingMySQL()) {
+        fetch(`/api/cart?userId=${user.id}`, { method: 'DELETE' })
+      } else {
+        localStorage.removeItem(`cart_${user.id}`)
+      }
     }
   }
 
-  const totalItems = cartItems.reduce((total, item) => total + item.quantity, 0)
-
-  const totalPrice = cartItems.reduce((total, item) => total + item.product.price * item.quantity, 0)
+  const totalItems = cartItems.reduce((t, i) => t + i.quantity, 0)
+  const totalPrice = cartItems.reduce((t, i) => t + i.product.price * i.quantity, 0)
 
   return (
-    <CartContext.Provider
-      value={{
-        cartItems,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        clearCart,
-        totalItems,
-        totalPrice,
-      }}
-    >
+    <CartContext.Provider value={{ cartItems, addToCart, removeFromCart, updateQuantity, clearCart, totalItems, totalPrice }}>
       {children}
     </CartContext.Provider>
   )
@@ -131,8 +153,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
 export const useCart = () => {
   const context = useContext(CartContext)
-  if (context === undefined) {
-    throw new Error("useCart must be used within a CartProvider")
-  }
+  if (!context) throw new Error("useCart must be used within a CartProvider")
   return context
 }

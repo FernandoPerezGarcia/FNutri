@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Plus, Minus, Save } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -10,10 +10,11 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { foods, calculateMealMacros } from "@/lib/data"
-import type { Food, UserMeal } from "@/lib/types"
+import { calculateMealMacros, getFoods } from "@/lib/data"
+import type { Food, UserMeal, FoodCategory } from "@/lib/types"
 import { useAuth } from "@/lib/auth-context"
 import { useToast } from "@/components/ui/use-toast"
+import { isUsingMySQL } from '@/lib/config'
 
 export default function CreateMenuPage() {
   const { user } = useAuth()
@@ -24,20 +25,58 @@ export default function CreateMenuPage() {
   const [mealTime, setMealTime] = useState<"breakfast" | "lunch" | "dinner" | "snack">("lunch")
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [allFoods, setAllFoods] = useState<Food[]>([])
+  const [isLoadingFoods, setIsLoadingFoods] = useState(true)
+  const [categoriesList, setCategoriesList] = useState<FoodCategory[]>([])
 
-  const categories = Array.from(new Set(foods.map((food) => food.category)))
+  // Load foods on client
+  useEffect(() => {
+    async function loadFoods() {
+      try {
+        const f = await getFoods()
+        setAllFoods(f)
+      } catch (err) {
+        console.error('Error loading foods:', err)
+      } finally {
+        setIsLoadingFoods(false)
+      }
+    }
+    loadFoods()
+  }, [])
 
-  const filteredFoods = foods.filter((food) => {
+  // Load categories from API
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const res = await fetch('/api/food-categories')
+        if (res.ok) {
+          const data = await res.json()
+          setCategoriesList(data.categories)
+        } else {
+          console.error('Error fetching categories:', res.statusText)
+        }
+      } catch (err) {
+        console.error('Error fetching categories:', err)
+      }
+    }
+    loadCategories()
+  }, [])
+
+  // Filtered foods based on search and selected category
+  const filteredFoods = allFoods.filter((food) => {
     const matchesSearch = food.name.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesCategory = selectedCategory ? food.category === selectedCategory : true
     return matchesSearch && matchesCategory
   })
 
+  // Handlers
   const addFood = (food: Food) => {
-    const existingFood = selectedFoods.find((item) => item.food.id === food.id)
-    if (existingFood) {
+    const existing = selectedFoods.find((item) => item.food.id === food.id)
+    if (existing) {
       setSelectedFoods((prev) =>
-        prev.map((item) => (item.food.id === food.id ? { ...item, grams: item.grams + 100 } : item)),
+        prev.map((item) =>
+          item.food.id === food.id ? { ...item, grams: item.grams + 100 } : item
+        )
       )
     } else {
       setSelectedFoods((prev) => [...prev, { food, grams: 100 }])
@@ -48,55 +87,54 @@ export default function CreateMenuPage() {
     if (grams <= 0) {
       setSelectedFoods((prev) => prev.filter((item) => item.food.id !== foodId))
     } else {
-      setSelectedFoods((prev) => prev.map((item) => (item.food.id === foodId ? { ...item, grams } : item)))
+      setSelectedFoods((prev) =>
+        prev.map((item) =>
+          item.food.id === foodId ? { ...item, grams } : item
+        )
+      )
     }
   }
 
   const macros = calculateMealMacros(selectedFoods)
 
-  const saveMeal = () => {
+  const saveMeal = async () => {
     if (!mealName.trim()) {
-      toast({
-        title: "Error",
-        description: "Por favor, introduce un nombre para la comida",
-        variant: "destructive",
-      })
+      toast({ title: 'Error', description: 'Introduce un nombre', variant: 'destructive' })
       return
     }
-
     if (selectedFoods.length === 0) {
-      toast({
-        title: "Error",
-        description: "Añade al menos un alimento a tu comida",
-        variant: "destructive",
-      })
+      toast({ title: 'Error', description: 'Añade alimentos', variant: 'destructive' })
       return
     }
-
-    const meal: UserMeal = {
+    const meal: any = {
       id: `meal_${Date.now()}`,
+      userId: user!.id,
       name: mealName,
       foods: selectedFoods,
-      date: selectedDate,
+      mealDate: selectedDate,
       mealTime,
-      calories: macros.calories,
-      protein: macros.protein,
-      carbs: macros.carbs,
-      fat: macros.fat,
+      totalCalories: macros.calories,
+      totalProtein: macros.protein,
+      totalCarbs: macros.carbs,
+      totalFat: macros.fat,
+      createdAt: new Date().toISOString(),
     }
-
-    // Guardar en localStorage
-    const userMeals = JSON.parse(localStorage.getItem(`meals_${user!.id}`) || "[]")
-    userMeals.push(meal)
-    localStorage.setItem(`meals_${user!.id}`, JSON.stringify(userMeals))
-
-    toast({
-      title: "Comida guardada",
-      description: `${mealName} se ha guardado correctamente`,
-    })
-
-    // Limpiar formulario
-    setMealName("")
+    if (isUsingMySQL()) {
+      try {
+        const res = await fetch(`/api/user-meals?userId=${user!.id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(meal)
+        })
+        if (!res.ok) console.error('Error saving via API:', res.statusText)
+      } catch (err) {
+        console.error('API save error:', err)
+      }
+    } else {
+      const um = JSON.parse(localStorage.getItem(`meals_${user!.id}`) || '[]')
+      um.push(meal)
+      localStorage.setItem(`meals_${user!.id}`, JSON.stringify(um))
+    }
+    toast({ title: 'Comida guardada', description: `${mealName} guardada` })
+    setMealName('')
     setSelectedFoods([])
   }
 
@@ -128,14 +166,14 @@ export default function CreateMenuPage() {
                 >
                   Todos
                 </Button>
-                {categories.map((category) => (
+                {categoriesList.map((cat) => (
                   <Button
-                    key={category}
-                    variant={selectedCategory === category ? "default" : "outline"}
+                    key={cat.id}
+                    variant={selectedCategory === cat.name ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setSelectedCategory(category)}
+                    onClick={() => setSelectedCategory(cat.name)}
                   >
-                    {category.charAt(0).toUpperCase() + category.slice(1)}
+                    {cat.name}
                   </Button>
                 ))}
               </div>

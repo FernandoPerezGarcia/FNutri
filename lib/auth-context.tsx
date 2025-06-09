@@ -7,6 +7,7 @@ import { useRouter, usePathname } from "next/navigation"
 import { useToast } from "@/components/ui/use-toast"
 import { useDatabase } from "@/lib/database-context"
 import { mysqlService } from "@/lib/mysql-service"
+import { isUsingMySQL } from './config'
 
 type User = {
   id: string
@@ -66,9 +67,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       let foundUser: User | null = null
 
-      if (isMySQL) {
-        // Usar MySQL
-        foundUser = await mysqlService.getUser(email, password)
+      if (isUsingMySQL()) {
+        // API login
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          foundUser = data.user;
+        }
       } else {
         // Usar localStorage
         const users = JSON.parse(localStorage.getItem("users") || "[]")
@@ -115,9 +124,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       let newUser: User | null = null
 
-      if (isMySQL) {
-        // Usar MySQL
-        newUser = await mysqlService.createUser(name, email, password)
+      if (isUsingMySQL()) {
+        // API register
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          newUser = data.user;
+        }
       } else {
         // Usar localStorage
         const users = JSON.parse(localStorage.getItem("users") || "[]")

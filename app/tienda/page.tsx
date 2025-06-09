@@ -1,22 +1,42 @@
 "use client"
 
-import { useState } from "react"
-import { Filter, Search } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Filter, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { ProductCard } from "@/components/product-card"
-import { products } from "@/lib/data"
+import { products as initialClientProducts, getProducts } from "@/lib/data"
 
 export default function StorePage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [localProducts, setLocalProducts] = useState(initialClientProducts) 
 
-  const categories = Array.from(new Set(products.map((product) => product.category)))
+  // Prevent hydration errors by doing data fetching after initial render
+  useEffect(() => {
+    const loadProducts = async () => {
+      try {
+        console.log('[StorePage] Fetching products client-side');
+        const fetchedProducts = await getProducts()
+        console.log('[StorePage] Fetched', fetchedProducts.length, 'products');
+        setLocalProducts(fetchedProducts)
+      } catch (error) {
+        console.error('[StorePage] Error loading products:', error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    
+    loadProducts()
+  }, [])
 
-  const filteredProducts = products.filter((product) => {
+  const categories = Array.from(new Set(localProducts.map((product) => product.category)))
+
+  const filteredProducts = localProducts.filter((product) => {
     const matchesSearch =
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.description.toLowerCase().includes(searchTerm.toLowerCase())
@@ -91,7 +111,12 @@ export default function StorePage() {
 
       <Separator className="my-6" />
 
-      {filteredProducts.length > 0 ? (
+      {/* Show loading state only during client-side data fetch, not on initial render */}
+      {isLoading ? (
+        <div className="text-center py-12">
+          <h3 className="text-lg font-medium">Cargando productos...</h3>
+        </div>
+      ) : filteredProducts.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {filteredProducts.map((product) => (
             <ProductCard key={product.id} product={product} />
@@ -106,6 +131,3 @@ export default function StorePage() {
     </div>
   )
 }
-
-// Importar X para el botón de eliminar filtro
-import { X } from "lucide-react"

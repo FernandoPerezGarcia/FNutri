@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
+import { isUsingMySQL } from "@/lib/config"
 
 export default function ContactPage() {
   const { toast } = useToast()
@@ -31,16 +32,28 @@ export default function ContactPage() {
     // Simular envío del formulario
     await new Promise((resolve) => setTimeout(resolve, 1000))
 
-    // Guardar consulta en localStorage
-    const consultations = JSON.parse(localStorage.getItem("consultations") || "[]")
     const consultation = {
       id: `consultation_${Date.now()}`,
       ...formData,
       createdAt: new Date().toISOString(),
       status: "pending",
     }
-    consultations.push(consultation)
-    localStorage.setItem("consultations", JSON.stringify(consultations))
+    if (isUsingMySQL()) {
+      try {
+        const res = await fetch("/api/consultations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(consultation),
+        })
+        if (!res.ok) console.error("Error saving consultation:", res.statusText)
+      } catch (err) {
+        console.error("API consultation save error:", err)
+      }
+    } else {
+      const consultations = JSON.parse(localStorage.getItem("consultations") || "[]")
+      consultations.push(consultation)
+      localStorage.setItem("consultations", JSON.stringify(consultations))
+    }
 
     toast({
       title: "Mensaje enviado",

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/lib/auth-context"
 import type { Order, UserMeal } from "@/lib/types"
+import { isUsingMySQL } from "@/lib/config"
 
 export default function ProfilePage() {
   const { user } = useAuth()
@@ -17,15 +18,39 @@ export default function ProfilePage() {
   const [meals, setMeals] = useState<UserMeal[]>([])
 
   useEffect(() => {
-    if (user) {
-      // Cargar pedidos
-      const userOrders = JSON.parse(localStorage.getItem(`orders_${user.id}`) || "[]")
-      setOrders(userOrders)
-
-      // Cargar comidas
-      const userMeals = JSON.parse(localStorage.getItem(`meals_${user.id}`) || "[]")
-      setMeals(userMeals)
+    const loadData = async () => {
+      if (!user) return;
+      if (isUsingMySQL()) {
+        try {
+          const resOrders = await fetch(`/api/orders?userId=${user.id}`)
+          if (resOrders.ok) {
+            const { orders } = await resOrders.json()
+            setOrders(orders)
+          } else {
+            console.error("Error fetching orders:", resOrders.statusText)
+          }
+        } catch (err) {
+          console.error("Error fetching orders:", err)
+        }
+        try {
+          const resMeals = await fetch(`/api/user-meals?userId=${user.id}`)
+          if (resMeals.ok) {
+            const { meals } = await resMeals.json()
+            setMeals(meals)
+          } else {
+            console.error("Error fetching meals:", resMeals.statusText)
+          }
+        } catch (err) {
+          console.error("Error fetching meals:", err)
+        }
+      } else {
+        const userOrders = JSON.parse(localStorage.getItem(`orders_${user.id}`) || "[]")
+        setOrders(userOrders)
+        const userMeals = JSON.parse(localStorage.getItem(`meals_${user.id}`) || "[]")
+        setMeals(userMeals)
+      }
     }
+    loadData()
   }, [user])
 
   if (!user) {
@@ -91,7 +116,7 @@ export default function ProfilePage() {
   // Agrupar comidas por fecha
   const mealsByDate = meals.reduce(
     (acc, meal) => {
-      const date = meal.date
+      const date = meal.mealDate
       if (!acc[date]) {
         acc[date] = []
       }
@@ -106,10 +131,10 @@ export default function ProfilePage() {
     .map(([date, dayMeals]) => {
       const totals = dayMeals.reduce(
         (acc, meal) => ({
-          calories: acc.calories + meal.calories,
-          protein: acc.protein + meal.protein,
-          carbs: acc.carbs + meal.carbs,
-          fat: acc.fat + meal.fat,
+          calories: acc.calories + meal.totalCalories,
+          protein: acc.protein + meal.totalProtein,
+          carbs: acc.carbs + meal.totalCarbs,
+          fat: acc.fat + meal.totalFat,
         }),
         { calories: 0, protein: 0, carbs: 0, fat: 0 },
       )
@@ -173,17 +198,17 @@ export default function ProfilePage() {
                           <div>
                             <h4 className="font-medium">Pedido #{order.id.slice(-6)}</h4>
                             <p className="text-sm text-muted-foreground">
-                              {new Date(order.createdAt).toLocaleDateString()}
+                              {new Date(order.createdAt!).toLocaleDateString()}
                             </p>
                           </div>
                           <Badge className={getStatusColor(order.status)}>{getStatusText(order.status)}</Badge>
                         </div>
 
                         <div className="space-y-2">
-                          {order.items.map((item, index) => (
+                          {order.items!.map((item, index) => (
                             <div key={index} className="flex justify-between text-sm">
                               <span>
-                                {item.product.name} x{item.quantity}
+                                {item.product!.name} x{item.quantity}
                               </span>
                               <span>€{(item.price * item.quantity).toFixed(2)}</span>
                             </div>
@@ -234,23 +259,23 @@ export default function ProfilePage() {
                             <div className="flex items-center space-x-2 mt-1">
                               <Badge variant="outline">{getMealTimeText(meal.mealTime)}</Badge>
                               <span className="text-sm text-muted-foreground">
-                                {new Date(meal.date).toLocaleDateString()}
+                                {new Date(meal.mealDate!).toLocaleDateString()}
                               </span>
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="font-medium">{meal.calories} kcal</p>
-                            <p className="text-sm text-muted-foreground">{meal.protein}g prot</p>
+                            <p className="font-medium">{meal.totalCalories} kcal</p>
+                            <p className="text-sm text-muted-foreground">{meal.totalProtein}g prot</p>
                           </div>
                         </div>
 
                         <div className="space-y-1">
-                          {meal.foods.map((foodItem, index) => (
+                          {meal.foods!.map((foodItem, index) => (
                             <div key={index} className="flex justify-between text-sm">
                               <span>
-                                {foodItem.food.name} ({foodItem.grams}g)
+                                {foodItem.food!.name} ({foodItem.grams}g)
                               </span>
-                              <span>{Math.round((foodItem.food.calories * foodItem.grams) / 100)} kcal</span>
+                              <span>{Math.round((foodItem.food!.calories * foodItem.grams) / 100)} kcal</span>
                             </div>
                           ))}
                         </div>
@@ -324,7 +349,7 @@ export default function ProfilePage() {
                                   {getMealTimeText(meal.mealTime)}
                                 </Badge>
                               </div>
-                              <span className="text-sm text-muted-foreground">{meal.calories} kcal</span>
+                              <span className="text-sm text-muted-foreground">{meal.totalCalories} kcal</span>
                             </div>
                           ))}
                         </div>

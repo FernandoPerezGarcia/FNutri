@@ -13,11 +13,14 @@ import { Separator } from "@/components/ui/separator"
 import { useCart } from "@/lib/cart-context"
 import { useAuth } from "@/lib/auth-context"
 import { useToast } from "@/components/ui/use-toast"
+import { isUsingMySQL } from '@/lib/config'
 import type { Address, Order } from "@/lib/types"
 
 interface CheckoutFormProps {
   onBack: () => void
 }
+
+type CheckoutAddress = Omit<Address, 'id' | 'userId' | 'isDefault'>;
 
 export function CheckoutForm({ onBack }: CheckoutFormProps) {
   const { cartItems, totalPrice, clearCart } = useCart()
@@ -25,7 +28,7 @@ export function CheckoutForm({ onBack }: CheckoutFormProps) {
   const { toast } = useToast()
   const [isProcessing, setIsProcessing] = useState(false)
 
-  const [shippingAddress, setShippingAddress] = useState<Address>({
+  const [shippingAddress, setShippingAddress] = useState<CheckoutAddress>({
     fullName: user?.name || "",
     street: "",
     city: "",
@@ -41,8 +44,7 @@ export function CheckoutForm({ onBack }: CheckoutFormProps) {
     // Simular procesamiento del pago
     await new Promise((resolve) => setTimeout(resolve, 2000))
 
-    // Crear pedido
-    const order: Order = {
+    const order: any = {
       id: `order_${Date.now()}`,
       userId: user!.id,
       items: cartItems.map((item) => ({
@@ -56,10 +58,22 @@ export function CheckoutForm({ onBack }: CheckoutFormProps) {
       createdAt: new Date().toISOString(),
     }
 
-    // Guardar pedido en localStorage
-    const orders = JSON.parse(localStorage.getItem(`orders_${user!.id}`) || "[]")
-    orders.push(order)
-    localStorage.setItem(`orders_${user!.id}`, JSON.stringify(orders))
+    if (isUsingMySQL()) {
+      try {
+        const res = await fetch('/api/orders?userId=' + user!.id, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(order)
+        });
+        if (!res.ok) console.error('Error saving order:', res.statusText);
+      } catch (err) {
+        console.error('API order save error:', err);
+      }
+    } else {
+      const orders = JSON.parse(localStorage.getItem(`orders_${user!.id}`) || "[]")
+      orders.push(order)
+      localStorage.setItem(`orders_${user!.id}`, JSON.stringify(orders))
+    }
 
     // Limpiar carrito
     clearCart()

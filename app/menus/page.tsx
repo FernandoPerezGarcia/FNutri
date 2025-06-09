@@ -20,7 +20,7 @@ export default function MenusPage() {
     // Simular tiempo de generación
     await new Promise((resolve) => setTimeout(resolve, 1000))
 
-    const newMenu = generateRandomMenu()
+    const newMenu = await generateRandomMenu()
     setCurrentMenu(newMenu)
     setIsGenerating(false)
   }

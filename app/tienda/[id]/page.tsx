@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { isUsingMySQL } from "@/lib/config"
 import Image from "next/image"
 import { ArrowLeft, Minus, Plus, ShoppingCart } from "lucide-react"
 
@@ -10,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { useCart } from "@/lib/cart-context"
 import { useAuth } from "@/lib/auth-context"
-import { products } from "@/lib/data"
+import { products as initialClientProducts } from "@/lib/data"
 
 export default function ProductDetailPage() {
   const params = useParams()
@@ -19,8 +20,36 @@ export default function ProductDetailPage() {
   const { user } = useAuth()
   const [quantity, setQuantity] = useState(1)
 
-  const product = products.find((p) => p.id === params.id)
+  const [product, setProduct] = useState(() => {
+    if (!isUsingMySQL()) {
+      return initialClientProducts.find((p) => p.id === params.id) || null
+    }
+    return null
+  })
+  const [loading, setLoading] = useState(isUsingMySQL())
 
+  useEffect(() => {
+    if (isUsingMySQL() && params.id) {
+      fetch(`/api/products/${params.id}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(res.statusText)
+          return res.json()
+        })
+        .then((data) => setProduct(data.product))
+        .catch((err) => console.error('Error fetching product:', err))
+        .finally(() => setLoading(false))
+    }
+  }, [params.id])
+
+  if (loading) {
+    return (
+      <div className="container py-8">
+        <div className="text-center">
+          <h3 className="text-lg font-medium">Cargando producto...</h3>
+        </div>
+      </div>
+    )
+  }
   if (!product) {
     return (
       <div className="container py-8">
